@@ -10,11 +10,11 @@
 
 | STT | Họ và Tên | MSSV | Email | Đóng góp |
 |-----|-----------|------|-------|----------|
-| 1 | Nguyễn Văn A | 20IT001 | a@example.com | ... |
-| 2 | Trần Thị B | 20IT002 | b@example.com | ... |
-| 3 | Lê Văn C | 20IT003 | c@example.com | ... |
+| 1 | Lê Tuấn Phong | B22DCCN615 | tuanphong322003@gmail.com | ... |
+| 2 | Phạm Hồng Quang | B22DCCN652 | hongquang02082004@gmail.com | ... |
+| 3 | Nguyễn Đình Tuấn | B22DCCN759 | dinhtuan27022004@gmail.com | ... |
 
-**Tên nhóm:** Nhóm 01 – Lập trình mạng  
+**Tên nhóm:** Nhóm 12 – Lập trình mạng  
 **Chủ đề đã đăng ký:** (…)
 
 ---
