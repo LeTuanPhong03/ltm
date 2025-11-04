@@ -36,6 +36,13 @@ except ImportError:
     sys.exit(1)
 
 try:
+    import numpy as np
+except ImportError:
+    print("Error: numpy library not installed")
+    print("Install with: pip install numpy")
+    sys.exit(1)
+
+try:
     import pyautogui
 except ImportError:
     print("Warning: pyautogui not installed. Mouse/keyboard control will be disabled.")
@@ -66,6 +73,18 @@ class StreamerClient:
         # Statistics
         self.frames_sent = 0
         self.commands_received = 0
+        
+        # LEVEL 1 UPGRADE: Adaptive quality control
+        self.jpeg_quality = 70  # Start with good quality
+        self.target_fps = 30
+        self.frame_times = []  # Track timing for adaptive adjustment
+        self.max_frame_time_samples = 10
+        
+        # LEVEL 2 UPGRADE: Motion detection
+        self.last_frame = None
+        self.motion_threshold = 5.0  # % change threshold
+        self.frames_since_last_send = 0
+        self.max_skip_frames = 5  # Don't skip more than 5 frames even if no motion
     
     def generate_session_id(self):
         """Generate unique session ID (9 digits)"""
@@ -135,6 +154,35 @@ class StreamerClient:
         except Exception as e:
             self.log(f"Error disconnecting: {e}")
             return False
+    
+    def detect_motion(self, current_img):
+        """
+        LEVEL 2: Detect if there's significant motion between frames
+        Returns: (has_motion, change_percentage)
+        """
+        try:
+            # Convert to grayscale numpy array for comparison
+            current_gray = np.array(current_img.convert('L').resize((160, 120)))  # Small size for speed
+            
+            if self.last_frame is None:
+                self.last_frame = current_gray
+                return True, 100.0  # First frame always send
+            
+            # Calculate difference
+            diff = np.abs(current_gray.astype(float) - self.last_frame.astype(float))
+            change_percent = (np.sum(diff > 30) / diff.size) * 100  # Count pixels with >30 difference
+            
+            has_motion = change_percent > self.motion_threshold
+            
+            # Update last frame if motion detected
+            if has_motion:
+                self.last_frame = current_gray
+            
+            return has_motion, change_percent
+            
+        except Exception as e:
+            self.log(f"Motion detection error: {e}")
+            return True, 100.0  # On error, send frame
             
     def capture_screen(self):
         """Capture màn hình và nén thành JPEG"""
@@ -155,18 +203,18 @@ class StreamerClient:
             original_height = screenshot.size[1]
             
             # Resize 800x600 với quality cao hơn cho hình ảnh sắc nét
-            img = img.resize((800, 600), Image.Resampling.LANCZOS)
+            resized_img = img.resize((800, 600), Image.Resampling.LANCZOS)
             
-            # JPEG quality 65 - cân bằng tốt giữa chất lượng và UDP limit
+            # LEVEL 1: Use adaptive quality
             buffer = io.BytesIO()
-            img.save(buffer, format='JPEG', quality=65, optimize=True)
+            resized_img.save(buffer, format='JPEG', quality=self.jpeg_quality, optimize=True, progressive=True)
             jpeg_data = buffer.getvalue()
             
             # Log warning nếu frame quá lớn
             if len(jpeg_data) > 65000:
                 self.log(f"⚠️ Frame too large: {len(jpeg_data)} bytes - may drop!")
             
-            return jpeg_data
+            return jpeg_data, resized_img  # Return both JPEG and PIL image for motion detection
             
         except Exception as e:
             self.log(f"Error capturing screen: {e}")
@@ -187,23 +235,69 @@ class StreamerClient:
                 if frame_count == 0:
                     self.log(f"🎬 Starting UDP streaming to {self.server_ip}:{self.udp_port}")
                 
-                # Capture màn hình
-                jpeg_data = self.capture_screen()
+                # LEVEL 1: Track timing for adaptive quality
+                frame_start = time.time()
                 
-                if jpeg_data:
-                    # Gửi qua UDP
-                    try:
-                        self.udp_socket.sendto(jpeg_data, (self.server_ip, self.udp_port))
-                        
-                        frame_count += 1
-                        self.frames_sent += 1
-                        if frame_count % 30 == 0:  # Log mỗi 30 frames
-                            self.log(f"Streamed {frame_count} frames, last size: {len(jpeg_data)} bytes")
-                    except Exception as e:
-                        self.log(f"❌ Error sending UDP packet: {e}")
+                # Capture màn hình
+                result = self.capture_screen()
+                
+                if result:
+                    # Unpack result based on return type
+                    if isinstance(result, tuple):
+                        jpeg_data, pil_img = result
+                    else:
+                        # Backward compatibility if no tuple returned
+                        jpeg_data = result
+                        pil_img = None
                     
-                    # FPS control: ~15 FPS cho mượt hơn
-                    time.sleep(0.066)  # 1/15 = 0.066s
+                    # LEVEL 2: Motion detection - skip if no motion
+                    should_send = True
+                    motion_percent = 0.0
+                    
+                    if pil_img is not None:
+                        has_motion, motion_percent = self.detect_motion(pil_img)
+                        self.frames_since_last_send += 1
+                        
+                        # Don't send if no motion, unless too many frames skipped
+                        if not has_motion and self.frames_since_last_send < self.max_skip_frames:
+                            should_send = False
+                        else:
+                            self.frames_since_last_send = 0
+                    
+                    if should_send:
+                        # Gửi qua UDP
+                        try:
+                            self.udp_socket.sendto(jpeg_data, (self.server_ip, self.udp_port))
+                        
+                            frame_count += 1
+                            self.frames_sent += 1
+                        
+                            # LEVEL 1: Adaptive quality adjustment
+                            frame_time = time.time() - frame_start
+                            self.frame_times.append(frame_time)
+                            if len(self.frame_times) > self.max_frame_time_samples:
+                                self.frame_times.pop(0)
+                        
+                            # Adjust quality every 30 frames
+                            if frame_count % 30 == 0:
+                                avg_time = sum(self.frame_times) / len(self.frame_times)
+                                target_time = 1.0 / self.target_fps
+                            
+                                # If too slow, reduce quality
+                                if avg_time > target_time * 1.2 and self.jpeg_quality > 50:
+                                    self.jpeg_quality = max(50, self.jpeg_quality - 5)
+                                    self.log(f"📉 Reducing quality to {self.jpeg_quality} (avg time: {avg_time:.3f}s)")
+                                # If fast enough, increase quality
+                                elif avg_time < target_time * 0.8 and self.jpeg_quality < 85:
+                                    self.jpeg_quality = min(85, self.jpeg_quality + 5)
+                                    self.log(f"📈 Increasing quality to {self.jpeg_quality} (avg time: {avg_time:.3f}s)")
+                            
+                                self.log(f"📊 Frames: {frame_count}, Size: {len(jpeg_data)}B, Q: {self.jpeg_quality}, Motion: {motion_percent:.1f}%")
+                        except Exception as e:
+                            self.log(f"❌ Error sending UDP packet: {e}")
+                    
+                    # FPS control: ~30 FPS cho mượt mà hơn
+                    time.sleep(0.033)  # 1/30 = 0.033s - Level 1 upgrade
                     
             except Exception as e:
                 self.log(f"Stream error: {e}")
