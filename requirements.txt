@@ -5,6 +5,7 @@
 mss>=9.0.1              # Fast screen capture
 Pillow>=10.0.0          # Image processing (JPEG compression)
 pyautogui>=0.9.54       # Mouse and keyboard control
+numpy>=1.24.0           # LEVEL 2: Motion detection calculations
 
 # For Client A (Controller) - Optional display
 # Pillow>=10.0.0        # Already listed above (optional for controller)
