@@ -1,74 +1,60 @@
-# MODULE CLIENT
+# CLIENT MODULES
 
-> 📘 *Sinh viên mô tả phần **client** tại đây. Điền đầy đủ theo framework và bài toán của nhóm.*
+Thư mục này chứa 2 client modules:
 
----
+## 📁 Cấu trúc
 
-## 🎯 MỤC TIÊU
-
-Client chịu trách nhiệm:
-- Gửi yêu cầu đến server
-- Hiển thị kết quả cho người dùng
-- Cung cấp giao diện tương tác
-
----
-
-## ⚙️ CÔNG NGHỆ SỬ DỤNG
-
-| Thành phần | Công nghệ |
-|------------|-----------|
-| Ngôn ngữ | Node.js / Python / Java / ... |
-| Thư viện chính | Axios / Requests / ... |
-| Giao thức | HTTP / WebSocket / ... |
+```
+client/
+├── README.md                    # File này
+├── controller/                  # Client A - Controller
+│   ├── README.md
+│   └── controller_client.py
+└── streamer/                    # Client B - Streamer  
+    ├── README.md
+    └── streamer_client.py
+```
 
 ---
 
-## 🚀 HƯỚNG DẪN CHẠY
+## 🎯 MÔ TẢ CÁC MODULE
 
-### Cài đặt
+### Client A - Controller (Thành viên 2: Phạm Hồng Quang)
+- **Chức năng**: Gửi lệnh điều khiển đến server qua TCP
+- **Công nghệ**: Python + Socket
+- **Xem chi tiết**: [controller/README.md](controller/README.md)
+
+### Client B - Streamer (Thành viên 3: Nguyễn Đình Tuấn)
+- **Chức năng**: Capture và gửi màn hình qua UDP, nhận và thực thi lệnh
+- **Công nghệ**: Python + mss + Pillow + pyautogui
+- **Xem chi tiết**: [streamer/README.md](streamer/README.md)
+
+---
+
+## 🚀 HƯỚNG DẪN NHANH
+
+### Cài đặt dependencies
 ```bash
-# Ví dụ với Node.js
-npm install
-
-# Hoặc với Python
+# Từ thư mục gốc của project
 pip install -r requirements.txt
 ```
 
-### Chạy chương trình
+### Chạy Controller (Client A)
 ```bash
-# Ví dụ
-node main.js
-# hoặc
-python client.py
+cd controller
+python controller_client.py <server_ip>
 ```
 
-### Cấu hình (nếu cần)
-- Server URL: `http://localhost:8080`
-- Có thể thay đổi trong file `config.js` hoặc `.env`
-
----
-
-## 📦 CẤU TRÚC
-```
-client/
-├── README.md
-├── main.js (hoặc client.py)
-├── config.js
-└── lib/
-    └── helper.js
-```
-
----
-
-## 💡 SỬ DỤNG
+### Chạy Streamer (Client B)
 ```bash
-# Ví dụ gửi request
-node main.js --input "data"
+cd streamer
+python streamer_client.py <server_ip>
 ```
 
 ---
 
-## 📝 GHI CHÚ
+## � LƯU Ý
 
-- Đảm bảo server đã chạy trước khi khởi động client
-- Mặc định kết nối đến `localhost:8080`
+- Server phải chạy **trước** khi chạy các client
+- Client B (Streamer) nên chạy trước Client A (Controller) để có màn hình hiển thị
+- Cả 2 clients phải kết nối đến cùng một server

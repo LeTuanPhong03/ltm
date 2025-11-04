@@ -1,0 +1,13 @@
+# Python dependencies for Remote Desktop Control System
+# Install all: pip install -r requirements.txt
+
+# For Client B (Streamer) - Screen capture and control
+mss>=9.0.1              # Fast screen capture
+Pillow>=10.0.0          # Image processing (JPEG compression)
+pyautogui>=0.9.54       # Mouse and keyboard control
+
+# For Client A (Controller) - Optional display
+# Pillow>=10.0.0        # Already listed above (optional for controller)
+
+# Note: Server uses only built-in Python libraries (socket, threading, json)
+# No additional dependencies needed for server
