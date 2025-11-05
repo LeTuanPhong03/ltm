@@ -85,6 +85,12 @@ class StreamerClient:
         self.motion_threshold = 5.0  # % change threshold
         self.frames_since_last_send = 0
         self.max_skip_frames = 5  # Don't skip more than 5 frames even if no motion
+        
+        # P2P UPGRADE: Peer-to-peer connection
+        self.p2p_enabled = False
+        self.controller_ip = None
+        self.controller_udp_port = None
+        self.p2p_tested = False
     
     def generate_session_id(self):
         """Generate unique session ID (9 digits)"""
@@ -265,9 +271,25 @@ class StreamerClient:
                             self.frames_since_last_send = 0
                     
                     if should_send:
-                        # Gửi qua UDP
+                        # P2P UPGRADE: Gửi qua UDP - thử P2P trước, fallback relay
                         try:
-                            self.udp_socket.sendto(jpeg_data, (self.server_ip, self.udp_port))
+                            # Try P2P if enabled and controller info available
+                            if self.p2p_enabled and self.controller_ip and self.controller_udp_port:
+                                try:
+                                    # Send directly to Controller via P2P
+                                    self.udp_socket.sendto(jpeg_data, (self.controller_ip, self.controller_udp_port))
+                                    if frame_count % 100 == 0 and not self.p2p_tested:
+                                        self.log(f"✅ P2P MODE ACTIVE: Sending directly to Controller {self.controller_ip}:{self.controller_udp_port}")
+                                        self.p2p_tested = True
+                                except Exception as p2p_error:
+                                    # P2P failed, fallback to relay
+                                    if self.p2p_enabled:
+                                        self.log(f"⚠️  P2P failed, falling back to RELAY: {p2p_error}")
+                                        self.p2p_enabled = False
+                                    self.udp_socket.sendto(jpeg_data, (self.server_ip, self.udp_port))
+                            else:
+                                # No P2P, use relay through server
+                                self.udp_socket.sendto(jpeg_data, (self.server_ip, self.udp_port))
                         
                             frame_count += 1
                             self.frames_sent += 1
@@ -321,7 +343,15 @@ class StreamerClient:
                 self.log(f"Received command: {cmd_type}")
                 
                 # Xử lý các lệnh
-                if cmd_type == 'MOUSE_CLICK':
+                if cmd_type == 'PEER_INFO':
+                    # P2P: Nhận thông tin Controller để kết nối trực tiếp
+                    self.controller_ip = payload.get('peer_ip')
+                    self.controller_udp_port = self.udp_port  # Assume same port
+                    self.p2p_enabled = True
+                    self.log(f"🔗 P2P: Received Controller info - {self.controller_ip}:{self.controller_udp_port}")
+                    self.log(f"✅ P2P MODE ENABLED - Will send directly to Controller")
+                    
+                elif cmd_type == 'MOUSE_CLICK':
                     self.handle_mouse_click(payload)
                     
                 elif cmd_type == 'MOUSE_MOVE':

@@ -35,6 +35,11 @@ class ControllerClient:
         self.running = False
         self.screen_data = None
         
+        # P2P UPGRADE
+        self.p2p_enabled = False
+        self.streamer_ip = None
+        self.p2p_receive_count = 0
+    
     def log(self, message):
         """Log với timestamp"""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -65,6 +70,14 @@ class ControllerClient:
                 return False
             
             self.log(f"✅ Authentication successful")
+            
+            # P2P: Check if peer info available
+            peer_info = response.get('peer_info')
+            if peer_info and peer_info.get('ip'):
+                self.streamer_ip = peer_info['ip']
+                self.p2p_enabled = True
+                self.log(f"🔗 P2P: Streamer IP received - {self.streamer_ip}")
+                self.log(f"✅ P2P MODE ENABLED - Will receive directly from Streamer")
             
             # UDP socket để nhận screen data
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -124,6 +137,18 @@ class ControllerClient:
                 # Nhận data qua UDP
                 data, address = self.udp_socket.recvfrom(65535)
                 
+                # P2P: Track if receiving directly from Streamer
+                if self.p2p_enabled and address[0] == self.streamer_ip:
+                    self.p2p_receive_count += 1
+                    if self.p2p_receive_count == 1:
+                        self.log(f"🎉 P2P SUCCESS! Receiving directly from Streamer {address[0]}:{address[1]}")
+                        # Notify server that P2P is working
+                        try:
+                            p2p_msg = json.dumps({'type': 'p2p_active'}).encode('utf-8')
+                            self.udp_socket.sendto(p2p_msg, (self.server_ip, self.udp_port))
+                        except:
+                            pass
+                
                 # Bỏ qua registration messages
                 try:
                     msg = json.loads(data.decode('utf-8'))
@@ -138,7 +163,8 @@ class ControllerClient:
                     if Image:
                         try:
                             img = Image.open(io.BytesIO(data))
-                            print(f"\rReceived frame: {len(data)} bytes, size: {img.size}", end='')
+                            mode_str = "P2P" if (self.p2p_enabled and address[0] == self.streamer_ip) else "RELAY"
+                            print(f"\r[{mode_str}] Frame: {len(data)}B, {img.size}, from {address[0]}", end='')
                         except:
                             pass
                             

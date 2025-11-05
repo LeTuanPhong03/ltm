@@ -1,8 +1,10 @@
 """
-Remote Desktop Control - Server (Trung gian)
+Remote Desktop Control - Server (Hybrid P2P + Relay)
 Thành viên 1: Lê Tuấn Phong (B22DCCN615)
 
 Chức năng:
+- P2P Signaling: Giúp clients trao đổi IP/port để kết nối trực tiếp
+- Relay fallback: Chuyển tiếp dữ liệu nếu P2P không thành công
 - Nhận lệnh điều khiển từ Client A qua TCP (port 5555)
 - Nhận dữ liệu màn hình từ Client B qua UDP (port 5556)
 - Chuyển tiếp dữ liệu giữa 2 clients
@@ -36,9 +38,12 @@ class RemoteDesktopServer:
         
         # Client info for logging
         self.client_info = {
-            'controller': {'ip': None, 'port': None, 'udp_port': None, 'udp_addr': None, 'socket': None, 'id': 'ClientA', 'connected_at': None},
-            'streamer': {'ip': None, 'port': None, 'id': 'ClientB', 'connected_at': None}
+            'controller': {'ip': None, 'port': None, 'udp_port': None, 'udp_addr': None, 'socket': None, 'id': 'ClientA', 'connected_at': None, 'external_udp_port': None},
+            'streamer': {'ip': None, 'port': None, 'id': 'ClientB', 'connected_at': None, 'udp_addr': None}
         }
+        
+        # P2P mode tracking
+        self.p2p_mode = False  # Track if clients are using P2P
         
         self.running = False
         
@@ -106,9 +111,16 @@ class RemoteDesktopServer:
                         
                         self.log(f"✅ TCP Client A (Controller) authenticated and connected: {client_address[0]}:{client_address[1]}")
                         
-                        # Send success response
-                        response = json.dumps({'status': 'success', 'message': 'Authentication successful'})
-                        client_socket.send(response.encode('utf-8'))
+                        # Send success response with P2P peer info
+                        response = {
+                            'status': 'success',
+                            'message': 'Authentication successful',
+                            'peer_info': self.get_streamer_peer_info()
+                        }
+                        client_socket.send(json.dumps(response).encode('utf-8'))
+                        
+                        # Send Controller's info to Streamer for P2P
+                        self.send_controller_info_to_streamer(client_address)
                         
                         # Start thread để nhận lệnh từ controller
                         threading.Thread(target=self.handle_controller_commands, 
@@ -150,6 +162,36 @@ class RemoteDesktopServer:
                    password == self.streamer_credentials['password'])
         
         return is_valid
+    
+    def get_streamer_peer_info(self):
+        """Get Streamer's connection info for P2P"""
+        if not self.client_info['streamer']['ip']:
+            return None
+        
+        return {
+            'ip': self.client_info['streamer']['ip'],
+            'udp_addr': self.client_info['streamer'].get('udp_addr'),
+            'connected': self.streamer_client is not None
+        }
+    
+    def send_controller_info_to_streamer(self, controller_addr):
+        """Send Controller's info to Streamer for P2P connection"""
+        if not self.streamer_client:
+            return
+        
+        try:
+            peer_info = {
+                'command': 'PEER_INFO',
+                'payload': {
+                    'peer_ip': controller_addr[0],
+                    'peer_port': controller_addr[1],
+                    'message': 'Controller connected, you can try P2P'
+                }
+            }
+            self.streamer_client.send(json.dumps(peer_info).encode('utf-8'))
+            self.log(f"📡 Sent Controller info to Streamer for P2P attempt")
+        except Exception as e:
+            self.log(f"Error sending peer info to Streamer: {e}")
                     
     def handle_controller_commands(self, client_socket):
         """Nhận lệnh từ Controller và chuyển đến Streamer"""
@@ -181,7 +223,8 @@ class RemoteDesktopServer:
         self.controller_client = None
         
     def handle_udp_data(self):
-        """Nhận dữ liệu màn hình từ Streamer qua UDP và forward qua UDP"""
+        """Nhận dữ liệu màn hình từ Streamer qua UDP và forward qua UDP (Relay mode)"""
+        relay_packet_count = 0
         while self.running:
             try:
                 data, address = self.udp_socket.recvfrom(65535)
@@ -193,17 +236,28 @@ class RemoteDesktopServer:
                         # Lưu địa chỉ UDP của Controller
                         self.client_info['controller']['udp_port'] = address[1]
                         self.client_info['controller']['udp_addr'] = address
-                        print(f"Controller UDP registered: {address}")
+                        self.client_info['controller']['external_udp_port'] = address[1]
+                        print(f"📡 Controller UDP registered: {address}")
+                        continue
+                    elif msg.get('type') == 'p2p_active':
+                        # Client báo đang dùng P2P
+                        self.p2p_mode = True
+                        self.log(f"✅ P2P mode activated! Server will reduce relay load.")
                         continue
                 except:
                     pass
                 
                 # Log lần đầu nhận từ Streamer
-                if not self.client_info['streamer']['ip']:
-                    self.client_info['streamer']['ip'] = address[0]
-                    self.client_info['streamer']['port'] = address[1]
-                    self.log(f"UDP Client B (Streamer) sending from: {address[0]}:{address[1]}")
+                if not self.client_info['streamer']['udp_addr']:
+                    self.client_info['streamer']['udp_addr'] = address
+                    self.log(f"📡 UDP Client B (Streamer) sending from: {address[0]}:{address[1]}")
                 
+                # Forward screen data qua UDP đến Controller (Relay mode)
+                if not self.p2p_mode and self.client_info['controller']['udp_addr']:
+                    relay_packet_count += 1
+                    if relay_packet_count % 100 == 0:
+                        self.log(f"🔄 RELAY MODE: Forwarded {relay_packet_count} packets (fallback active)")
+                        
                 # Forward screen data qua UDP đến Controller
                 if self.client_info['controller']['udp_addr']:
                     try:
